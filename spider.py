@@ -47,6 +47,7 @@ class Spider:
         self.base_url = self.get_base_url(url)
         self.visited_urls = set()
         self.success_visited_urls = set()
+        self.to_work_urls = set()
 
     def get_base_url(self, url):
         return urlparse(url).netloc
@@ -97,6 +98,9 @@ class Spider:
         # TODO: add test
         return [link for link in links if link not in self.visited_urls]
 
+    def remove_to_work_urls(self, links):
+        return [link for link in links if link not in self.to_work_urls]
+
     def filter_links(self, links, url):
         filter_links = copy(links)
         filter_links = self.normalize_relative_links(filter_links, url)
@@ -105,6 +109,7 @@ class Spider:
         if self.no_parent is True:
             filter_links = self.remove_not_parent_links(filter_links)
         filter_links = self.remove_visited_urls(filter_links)
+        filter_links = self.remove_to_work_urls(filter_links)
         return filter_links
 
     async def download_urls(self, url):
@@ -118,6 +123,7 @@ class Spider:
             # TODO: add custom filters
             # TODO: add
             tasks_subcategory.append(asyncio.create_task(self.download_urls(link)))
+        self.to_work_urls.update(filtering_links)
         await asyncio.gather(*tasks_subcategory)
 
     @staticmethod
