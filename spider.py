@@ -48,6 +48,17 @@ class Spider:
         self.visited_urls = set()
         self.success_visited_urls = set()
         self.to_work_urls = set()
+        self.filters = self.get_list_filters()
+
+    def get_list_filters(self):
+        filters = (
+            self.normalize_relative_links,
+            self.filter_only_host_links,
+            self.remove_not_parent_links,
+            self.remove_visited_urls,
+            self.remove_to_work_urls,
+        )
+        return filters
 
     def get_base_url(self, url):
         return urlparse(url).netloc
@@ -77,8 +88,10 @@ class Spider:
         print(f"Visited urls: {len(self.visited_urls)}")
         print(f"Success visited urls: {len(self.success_visited_urls)}")
 
-    def filter_only_host_links(self, links: Iterable[str]) -> Iterable[str]:
-        return [link for link in links if self.get_base_url(link) == self.base_url]
+    def filter_only_host_links(self, links: Iterable[str], *args) -> Iterable[str]:
+        if self.span_hosts is False:
+            return [link for link in links if self.get_base_url(link) == self.base_url]
+        return links
 
     def normalize_relative_links(self, links: Iterable[str], url=None) -> List[str]:
         if url is None:
@@ -90,26 +103,23 @@ class Spider:
             norm_links.append(link)
         return norm_links
 
-    def remove_not_parent_links(self, links: Iterable[str]) -> List[str]:
+    def remove_not_parent_links(self, links: Iterable[str], *args) -> List[str]:
         # TODO: add test
-        return [link for link in links if self.url in link]
+        if self.no_parent is True:
+            return [link for link in links if self.url in link]
+        return links
 
-    def remove_visited_urls(self, links):
+    def remove_visited_urls(self, links, *args):
         # TODO: add test
         return [link for link in links if link not in self.visited_urls]
 
-    def remove_to_work_urls(self, links):
+    def remove_to_work_urls(self, links, *args):
         return [link for link in links if link not in self.to_work_urls]
 
     def filter_links(self, links, url):
         filter_links = copy(links)
-        filter_links = self.normalize_relative_links(filter_links, url)
-        if self.span_hosts is False:
-            filter_links = self.filter_only_host_links(filter_links)
-        if self.no_parent is True:
-            filter_links = self.remove_not_parent_links(filter_links)
-        filter_links = self.remove_visited_urls(filter_links)
-        filter_links = self.remove_to_work_urls(filter_links)
+        for filter_ in self.filters:
+            filter_links = filter_(filter_links, url)
         return filter_links
 
     async def download_urls(self, url):
