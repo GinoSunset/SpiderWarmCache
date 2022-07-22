@@ -3,7 +3,7 @@ import aiohttp
 import asyncio
 from copy import copy
 from urllib.parse import urlparse, urljoin
-from typing import Iterable, List
+from typing import Iterable, List, Set
 
 
 from bs4 import BeautifulSoup
@@ -25,6 +25,12 @@ def args_parse():
         action="store_true",
         default=False,
     )
+    parser.add_argument(
+        "-nq",
+        "--no-query-params",
+        help="remove from url query params",
+        action="store_true",
+    )
     args = parser.parse_args()
     print(args)
     return args
@@ -38,12 +44,14 @@ class Spider:
         span_hosts=False,
         no_parent=False,
         run_session=True,
+        no_query_param=False,
     ):
         self.url = url
         self.aio_timeout = aiohttp.ClientTimeout(total=timeout)
         self.span_hosts = span_hosts
         self.session = None
         self.no_parent = no_parent
+        self.no_query_param = no_query_param
         self.base_url = self.get_base_url(url)
         self.visited_urls = set()
         self.success_visited_urls = set()
@@ -51,13 +59,16 @@ class Spider:
         self.filters = self.get_list_filters()
 
     def get_list_filters(self):
-        filters = (
+        # TODO: remove unnecessary filter
+        filters = [
             self.normalize_relative_links,
+            self.remove_query_params,
+            self.remove_duplicates_links,
             self.filter_only_host_links,
             self.remove_not_parent_links,
             self.remove_visited_urls,
             self.remove_to_work_urls,
-        )
+        ]
         return filters
 
     def get_base_url(self, url):
@@ -121,6 +132,12 @@ class Spider:
         for filter_ in self.filters:
             filter_links = filter_(filter_links, url)
         return filter_links
+
+    def remove_duplicates_links(self, links: Iterable[str], *args) -> Set[str]:
+        return set(links)
+
+    def remove_query_params(self, links, *args) -> List[str]:
+        return [urljoin(url, urlparse(url).path) for url in links]
 
     async def download_urls(self, url):
         page = await self.download_page(url)
