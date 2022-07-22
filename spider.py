@@ -59,7 +59,6 @@ class Spider:
         self.filters = self.get_list_filters()
 
     def get_list_filters(self):
-        # TODO: remove unnecessary filter
         filters = [
             self.normalize_relative_links,
             self.remove_query_params,
@@ -69,6 +68,12 @@ class Spider:
             self.remove_visited_urls,
             self.remove_to_work_urls,
         ]
+        if self.no_query_param is False:
+            filters.remove(self.remove_query_params)
+        if self.no_parent is False:
+            filters.remove(self.remove_not_parent_links)
+        if self.span_hosts is False:
+            filters.remove(self.filter_only_host_links)
         return filters
 
     def get_base_url(self, url):
@@ -100,9 +105,7 @@ class Spider:
         print(f"Success visited urls: {len(self.success_visited_urls)}")
 
     def filter_only_host_links(self, links: Iterable[str], *args) -> Iterable[str]:
-        if self.span_hosts is False:
-            return [link for link in links if self.get_base_url(link) == self.base_url]
-        return links
+        return [link for link in links if self.get_base_url(link) == self.base_url]
 
     def normalize_relative_links(self, links: Iterable[str], url=None) -> List[str]:
         if url is None:
@@ -116,9 +119,7 @@ class Spider:
 
     def remove_not_parent_links(self, links: Iterable[str], *args) -> List[str]:
         # TODO: add test
-        if self.no_parent is True:
-            return [link for link in links if self.url in link]
-        return links
+        return [link for link in links if self.url in link]
 
     def remove_visited_urls(self, links, *args):
         # TODO: add test
