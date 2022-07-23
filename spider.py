@@ -202,5 +202,6 @@ if __name__ == "__main__":
         timeout=args.timeout,
         no_parent=args.np,
         span_hosts=args.span_hosts,
+        no_query_param=args.nq,
     )
     asyncio.run(s.run_spider())
