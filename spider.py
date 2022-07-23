@@ -8,6 +8,8 @@ from typing import Iterable, List, Set
 
 from bs4 import BeautifulSoup
 
+TIMES_DICT = {}
+
 
 def args_parse():
     parser = argparse.ArgumentParser(description="Spider")
@@ -34,6 +36,27 @@ def args_parse():
     args = parser.parse_args()
     print(args)
     return args
+
+
+async def on_request_start(session, trace_config_ctx, params):
+    trace_config_ctx.start = asyncio.get_event_loop().time()
+    trace_config_ctx.url = params.url
+
+
+async def on_request_end(session, trace_config_ctx, params):
+    elapsed_time = asyncio.get_event_loop().time() - trace_config_ctx.start
+    # TODO: add params to disable time
+    TIMES_DICT[str(params.url)] = elapsed_time
+
+
+async def on_connection_queued_start(session, trace_config_ctx, params):
+    trace_config_ctx.start_qu = asyncio.get_event_loop().time()
+
+
+async def on_connection_queued_end(session, trace_config_ctx, params):
+    elapsed_time = asyncio.get_event_loop().time() - trace_config_ctx.start_qu
+    # TODO: add params to disable time
+    TIMES_DICT[str(trace_config_ctx.url)] = elapsed_time
 
 
 class Spider:
@@ -89,7 +112,7 @@ class Spider:
         except Exception as e:
             print(f"[x] Other error {url}. Error: {e} ")
         else:
-            print(f"[+] url {url} visited")
+            print(f"[+][{TIMES_DICT.get(url,0.0):7.3f}] url {url} visited ")
             self.success_visited_urls.add(url)
             return page
         finally:
@@ -97,7 +120,14 @@ class Spider:
 
     async def run_spider(self):
         print(f"Start warm {self.url} page")
-        async with aiohttp.ClientSession(timeout=self.aio_timeout) as session:
+        trace_config = aiohttp.TraceConfig()
+        trace_config.on_request_start.append(on_request_start)
+        trace_config.on_request_end.append(on_request_end)
+        trace_config.on_connection_queued_start.append(on_connection_queued_start)
+        trace_config.on_connection_queued_end.append(on_connection_queued_end)
+        async with aiohttp.ClientSession(
+            timeout=self.aio_timeout, trace_configs=[trace_config]
+        ) as session:
             self.session = session
             await self.download_urls(self.url)
         print(f"Completed")
