@@ -1,6 +1,8 @@
 import argparse
 import aiohttp
 import asyncio
+import time
+from aiohttp import TraceConfig
 from copy import copy
 from urllib.parse import urlparse, urljoin
 from typing import Iterable, List, Set
@@ -9,6 +11,15 @@ from typing import Iterable, List, Set
 from bs4 import BeautifulSoup
 
 TIMES_DICT = {}
+
+
+class Profiler(TraceConfig):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.on_request_start.append(on_request_start)
+        self.on_request_end.append(on_request_end)
+        self.on_connection_queued_start.append(on_connection_queued_start)
+        self.on_connection_queued_end.append(on_connection_queued_end)
 
 
 def args_parse():
@@ -102,10 +113,11 @@ class Spider:
     def get_base_url(self, url):
         return urlparse(url).netloc
 
-    async def download_page(self, url: str):
-
+    async def download_page(self, url: str, session=None):
+        if session is None:
+            session = self.session
         try:
-            async with self.session.get(url) as response:
+            async with session.get(url) as response:
                 page = await response.read()
         except asyncio.TimeoutError:
             print(f"[-] url {url} not available.")
@@ -120,13 +132,8 @@ class Spider:
 
     async def run_spider(self):
         print(f"Start warm {self.url} page")
-        trace_config = aiohttp.TraceConfig()
-        trace_config.on_request_start.append(on_request_start)
-        trace_config.on_request_end.append(on_request_end)
-        trace_config.on_connection_queued_start.append(on_connection_queued_start)
-        trace_config.on_connection_queued_end.append(on_connection_queued_end)
         async with aiohttp.ClientSession(
-            timeout=self.aio_timeout, trace_configs=[trace_config]
+            timeout=self.aio_timeout, trace_configs=[Profiler()]
         ) as session:
             self.session = session
             await self.download_urls(self.url)
@@ -170,19 +177,25 @@ class Spider:
     def remove_query_params(self, links, *args) -> List[str]:
         return [urljoin(url, urlparse(url).path) for url in links]
 
-    async def download_urls(self, url):
-        page = await self.download_page(url)
+    async def download_urls(self, url, session=None):
+        page = await self.download_page(url, session)
         if not page:
             return
         all_links = self.get_all_links_from_page(page)
         filtering_links = self.filter_links(all_links, url)
         tasks_subcategory = []
+        current_session = aiohttp.ClientSession(
+            timeout=self.aio_timeout, trace_configs=[Profiler()]
+        )
+
         for link in filtering_links:
             # TODO: add custom filters
-            # TODO: add
-            tasks_subcategory.append(asyncio.create_task(self.download_urls(link)))
+            tasks_subcategory.append(
+                asyncio.create_task(self.download_urls(link, session=current_session))
+            )
         self.to_work_urls.update(filtering_links)
-        await asyncio.gather(*tasks_subcategory)
+        async with current_session:
+            await asyncio.gather(*tasks_subcategory)
 
     @staticmethod
     def get_all_links_from_page(page):
@@ -196,12 +209,16 @@ class Spider:
 
 if __name__ == "__main__":
     print("Start spider")
+    start_time = time.time()
     args = args_parse()
     s = Spider(
         url=args.url,
         timeout=args.timeout,
         no_parent=args.np,
         span_hosts=args.span_hosts,
-        no_query_param=args.nq,
+        no_query_param=args.no_query_params,
     )
     asyncio.run(s.run_spider())
+    end_time = time.time() - start_time
+
+    print(f"Completed time {end_time:.3} sec")
