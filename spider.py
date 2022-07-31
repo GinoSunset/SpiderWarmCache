@@ -235,4 +235,4 @@ if __name__ == "__main__":
     asyncio.run(s.run_spider())
     end_time = time.time() - start_time
 
-    print(f"Completed time {end_time:.3} sec")
+    print(f"Completed time {end_time:.3f} sec")
