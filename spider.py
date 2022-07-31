@@ -2,7 +2,6 @@ import argparse
 import aiohttp
 import asyncio
 import time
-from aiohttp import TraceConfig
 from copy import copy
 from urllib.parse import urlparse, urljoin
 from typing import Iterable, List, Set
@@ -13,7 +12,7 @@ from bs4 import BeautifulSoup
 TIMES_DICT = {}
 
 
-class Profiler(TraceConfig):
+class Profiler(aiohttp.TraceConfig):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.on_request_start.append(on_request_start)
@@ -25,7 +24,9 @@ class Profiler(TraceConfig):
 def args_parse():
     parser = argparse.ArgumentParser(description="Spider")
     parser.add_argument("-u", "--url", help="URL to start spider", required=True)
-    parser.add_argument("-t", "--timeout", help="Timeout", default=10, type=int)
+    parser.add_argument(
+        "-t", "--timeout", help="Timeout. By default [10]", default=10, type=int
+    )
     parser.add_argument(
         "-np",
         "-–no-parent",
@@ -42,6 +43,12 @@ def args_parse():
         "-nq",
         "--no-query-params",
         help="remove from url query params",
+        action="store_true",
+    )
+    parser.add_argument(
+        "-sv",
+        "--ssl-verify",
+        help="By default ssl not verify",
         action="store_true",
     )
     args = parser.parse_args()
@@ -79,6 +86,7 @@ class Spider:
         no_parent=False,
         run_session=True,
         no_query_param=False,
+        ssl_verify=False,
     ):
         self.url = url
         self.aio_timeout = aiohttp.ClientTimeout(total=timeout)
@@ -91,6 +99,7 @@ class Spider:
         self.success_visited_urls = set()
         self.to_work_urls = set()
         self.filters = self.get_list_filters()
+        self.ssl_verify = ssl_verify
 
     def get_list_filters(self):
         filters = [
@@ -133,9 +142,12 @@ class Spider:
     async def run_spider(self):
         print(f"Start warm {self.url} page")
         async with aiohttp.ClientSession(
-            timeout=self.aio_timeout, trace_configs=[Profiler()]
+            connector=aiohttp.TCPConnector(ssl=self.ssl_verify),
+            timeout=self.aio_timeout,
+            trace_configs=[Profiler()],
         ) as session:
             self.session = session
+
             await self.download_urls(self.url)
         print(f"Completed")
         print(f"Visited urls: {len(self.visited_urls)}")
@@ -185,9 +197,10 @@ class Spider:
         filtering_links = self.filter_links(all_links, url)
         tasks_subcategory = []
         current_session = aiohttp.ClientSession(
-            timeout=self.aio_timeout, trace_configs=[Profiler()]
+            connector=aiohttp.TCPConnector(ssl=self.ssl_verify),
+            timeout=self.aio_timeout,
+            trace_configs=[Profiler()],
         )
-
         for link in filtering_links:
             # TODO: add custom filters
             tasks_subcategory.append(
@@ -217,6 +230,7 @@ if __name__ == "__main__":
         no_parent=args.np,
         span_hosts=args.span_hosts,
         no_query_param=args.no_query_params,
+        ssl_verify=args.ssl_verify,
     )
     asyncio.run(s.run_spider())
     end_time = time.time() - start_time
