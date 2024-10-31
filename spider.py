@@ -5,12 +5,9 @@ import time
 from copy import copy
 from urllib.parse import urlparse, urljoin
 from typing import Iterable, List, Set
-
-
 from bs4 import BeautifulSoup
 
 TIMES_DICT = {}
-
 
 class Profiler(aiohttp.TraceConfig):
     def __init__(self, *args, **kwargs):
@@ -35,7 +32,7 @@ def args_parse():
     )
     parser.add_argument(
         "--span-hosts",
-        help="The option turns on host spanning, thus allowing  to visit any host referenced by a link. ",
+        help="The option turns on host spanning, thus allowing to visit any host referenced by a link.",
         action="store_true",
         default=False,
     )
@@ -46,10 +43,14 @@ def args_parse():
         action="store_true",
     )
     parser.add_argument(
-        "-sv",
-        "--ssl-verify",
-        help="By default ssl not verify",
-        action="store_true",
+        "-sv", "--ssl-verify", help="By default ssl not verify", action="store_true"
+    )
+    parser.add_argument(
+        "-c",
+        "--concurrent",
+        help="Maximum number of concurrent requests",
+        type=int,
+        default=5,
     )
     args = parser.parse_args()
     print(args)
@@ -63,7 +64,6 @@ async def on_request_start(session, trace_config_ctx, params):
 
 async def on_request_end(session, trace_config_ctx, params):
     elapsed_time = asyncio.get_event_loop().time() - trace_config_ctx.start
-    # TODO: add params to disable time
     TIMES_DICT[str(params.url)] = elapsed_time
 
 
@@ -73,7 +73,6 @@ async def on_connection_queued_start(session, trace_config_ctx, params):
 
 async def on_connection_queued_end(session, trace_config_ctx, params):
     elapsed_time = asyncio.get_event_loop().time() - trace_config_ctx.start_qu
-    # TODO: add params to disable time
     TIMES_DICT[str(trace_config_ctx.url)] = elapsed_time
 
 
@@ -87,6 +86,7 @@ class Spider:
         run_session=True,
         no_query_param=False,
         ssl_verify=False,
+        max_concurrent_requests=5,
     ):
         self.url = url
         self.aio_timeout = aiohttp.ClientTimeout(total=timeout)
@@ -100,6 +100,9 @@ class Spider:
         self.to_work_urls = set()
         self.filters = self.get_list_filters()
         self.ssl_verify = ssl_verify
+        self.semaphore = asyncio.Semaphore(
+            max_concurrent_requests
+        )  # ограничение на количество запросов
 
     def get_list_filters(self):
         filters = [
@@ -125,19 +128,20 @@ class Spider:
     async def download_page(self, url: str, session=None):
         if session is None:
             session = self.session
-        try:
-            async with session.get(url) as response:
-                page = await response.read()
-        except asyncio.TimeoutError:
-            print(f"[-] url {url} not available.")
-        except Exception as e:
-            print(f"[x] Other error {url}. Error: {e} ")
-        else:
-            print(f"[+][{TIMES_DICT.get(url,0.0):7.3f}] url {url} visited ")
-            self.success_visited_urls.add(url)
-            return page
-        finally:
-            self.visited_urls.add(url)
+        async with self.semaphore:  # ограничение с помощью семафора
+            try:
+                async with session.get(url) as response:
+                    page = await response.read()
+            except asyncio.TimeoutError:
+                print(f"[-] url {url} not available.")
+            except Exception as e:
+                print(f"[x] Other error {url}. Error: {e} ")
+            else:
+                print(f"[+][{TIMES_DICT.get(url,0.0):7.3f}] url {url} visited ")
+                self.success_visited_urls.add(url)
+                return page
+            finally:
+                self.visited_urls.add(url)
 
     async def run_spider(self):
         print(f"Start warm {self.url} page")
@@ -147,9 +151,8 @@ class Spider:
             trace_configs=[Profiler()],
         ) as session:
             self.session = session
-
             await self.download_urls(self.url)
-        print(f"Completed")
+        print("Completed")
         print(f"Visited urls: {len(self.visited_urls)}")
         print(f"Success visited urls: {len(self.success_visited_urls)}")
 
@@ -167,11 +170,9 @@ class Spider:
         return norm_links
 
     def remove_not_parent_links(self, links: Iterable[str], *args) -> List[str]:
-        # TODO: add test
         return [link for link in links if self.url in link]
 
     def remove_visited_urls(self, links, *args):
-        # TODO: add test
         return [link for link in links if link not in self.visited_urls]
 
     def remove_to_work_urls(self, links, *args):
@@ -202,7 +203,6 @@ class Spider:
             trace_configs=[Profiler()],
         )
         for link in filtering_links:
-            # TODO: add custom filters
             tasks_subcategory.append(
                 asyncio.create_task(self.download_urls(link, session=current_session))
             )
@@ -231,6 +231,7 @@ if __name__ == "__main__":
         span_hosts=args.span_hosts,
         no_query_param=args.no_query_params,
         ssl_verify=args.ssl_verify,
+        max_concurrent_requests=args.concurrent,
     )
     asyncio.run(s.run_spider())
     end_time = time.time() - start_time
